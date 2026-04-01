@@ -3,6 +3,7 @@ import NextAuth from "next-auth";
 import {
   publicRoutes,
   authRoutes,
+  protectedRoutes,
   apiAuthPrefix,
   DEFAULT_LOGIN_REDIRECT,
 } from "@/routes";
@@ -17,29 +18,24 @@ export default auth((req) => {
 
   const isPublicRoute = publicRoutes.includes(nextUrl.pathname);
   const isAuthRoute = authRoutes.includes(nextUrl.pathname);
+  const isProtectedRoute = protectedRoutes.includes(nextUrl.pathname);
   const isApiAuthRoute = nextUrl.pathname.startsWith(apiAuthPrefix);
 
-  //  Always allow Auth.js API routes
   if (isApiAuthRoute) {
     return null;
   }
 
-  //  If logged in → block auth pages (login/register)
   if (isAuthRoute && isLoggedIn) {
     return Response.redirect(new URL(DEFAULT_LOGIN_REDIRECT, nextUrl));
   }
 
-  //  If NOT logged in → block protected routes
-  if (!isLoggedIn && !isPublicRoute) {
+  if (!isLoggedIn && isProtectedRoute && !isPublicRoute) {
     return Response.redirect(new URL("/auth/sign-in", nextUrl));
   }
 
   return null;
 });
 
-
 export const config = {
-  matcher: [
-    "/((?!_next|.*\\..*).*)",
-  ],
+  matcher: ["/((?!_next|.*\\..*).*)"],
 };

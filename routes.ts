@@ -15,7 +15,7 @@ export const publicRoutes: string[] = [
  * Example use-case: login, register
  */
 export const authRoutes: string[] = [
-    "auth/sign-in",
+    "/auth/sign-in",
 
 ]
 
