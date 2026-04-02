@@ -33,12 +33,7 @@ export function Header() {
                     href="/"
                     className="flex items-center gap-2 justify-center"
                   >
-                    <Image
-                      src="/logo.svg"
-                      alt="Logo"
-                      height={60}
-                      width={60}
-                    />
+                    <Image src="/logo.svg" alt="Logo" height={60} width={60} />
 
                     <span className="hidden sm:block font-extrabold text-lg">
                       VibeCode Editor
@@ -77,7 +72,7 @@ export function Header() {
                   <span className="text-zinc-300 dark:text-zinc-700">|</span>
                   {/* <HeaderPro /> */}
                   <ThemeToggle />
-                  <UserButton/>
+                  <UserButton />
                 </div>
 
                 {/* Mobile Navigation remains unchanged */}
@@ -95,7 +90,7 @@ export function Header() {
                     API
                   </Link>
                   <ThemeToggle />
-                  <UserButton/>
+                  <UserButton />
                 </div>
               </div>
             </div>

@@ -4,6 +4,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -15,15 +16,16 @@ import LogoutButton from "./logout-button";
 import { useCurrentUser } from "../hooks/use-current-user";
 
 const UserButton = () => {
-
-  const user = useCurrentUser()
+  const user = useCurrentUser();
+  const userImage = user?.image ?? undefined;
+  const userName = user?.name ?? "User";
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild>
         <div className={cn("relative rounded-full")}>
           <Avatar>
-            <AvatarImage src={user?.image!} alt={user?.name!} />
+            <AvatarImage src={userImage} alt={userName} />
             <AvatarFallback className="bg-red-500">
               <User className="text-white" />
             </AvatarFallback>
@@ -31,21 +33,26 @@ const UserButton = () => {
         </div>
       </DropdownMenuTrigger>
 
-    <DropdownMenuContent className="mr-4">
-      <DropdownMenuItem>
-        <span>
-          {user?.email}
-        </span>
-      </DropdownMenuItem>
-      <DropdownMenuSeparator/>
+      <DropdownMenuContent
+        side="bottom"
+        align="end"
+        sideOffset={10}
+        className="w-64"
+      >
+        <DropdownMenuLabel className="space-y-1">
+          <p className="text-sm font-medium leading-none">{userName}</p>
+          <p className="break-all text-xs font-normal text-muted-foreground">
+            {user?.email}
+          </p>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
         <LogoutButton>
-            <DropdownMenuItem>
-                <LogOut className="h-4 w-4 mr-2"/>
-                LogOut
-            </DropdownMenuItem>
+          <DropdownMenuItem>
+            <LogOut className="mr-2 h-4 w-4" />
+            LogOut
+          </DropdownMenuItem>
         </LogoutButton>
-    </DropdownMenuContent>
-
+      </DropdownMenuContent>
     </DropdownMenu>
   );
 };
