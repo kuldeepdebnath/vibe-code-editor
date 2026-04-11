@@ -18,12 +18,7 @@ const Page = async () => {
         {playgrounds && playgrounds.length === 0 ? (
           <EmptyState />
         ) : (
-          <ProjectTable
-            projects={playgrounds || []}
-            onDeleteProject={() => {}}
-            onUpdateProject={() => {}}
-            onDuplicateProject={() => {}}
-          />
+          <ProjectTable projects={playgrounds || []} />
         )}
       </div>
     </div>
