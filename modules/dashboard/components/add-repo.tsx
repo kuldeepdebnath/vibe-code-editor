@@ -4,13 +4,12 @@ import { ArrowDown } from "lucide-react"
 import Image from "next/image"
 
 const AddRepo = () => {
+  const cardClassName =
+    "group flex flex-row items-center justify-between rounded-lg border bg-muted px-6 py-6 shadow-[0_2px_10px_rgba(0,0,0,0.08)] transition-all duration-300 ease-in-out hover:scale-[1.02] hover:border-[#E93F3F] hover:bg-background hover:shadow-[0_10px_30px_rgba(233,63,63,0.15)] cursor-pointer"
+
   return (
     <div
-      className="group px-6 py-6 flex flex-row justify-between items-center border rounded-lg bg-muted cursor-pointer 
-      transition-all duration-300 ease-in-out
-      hover:bg-background hover:border-[#E93F3F] hover:scale-[1.02]
-      shadow-[0_2px_10px_rgba(0,0,0,0.08)]
-      hover:shadow-[0_10px_30px_rgba(233,63,63,0.15)]"
+      className={cardClassName}
     >
       <div className="flex flex-row justify-center items-start gap-4">
         <Button
