@@ -2,14 +2,33 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-// import { createPlayground } from "@/features/playground/actions";
+import { createPlayground } from "@/modules/dashboard/actions";
 import { Plus } from "lucide-react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { toast } from "sonner";
 import TemplateSelectingModal from "./template-selecting-modal";
 
 const AddNewButton = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const[selectedTemplate , setSelectedTemplate] = useState<{
+    title:string;
+    template: "REACT" | "VUE" | "ANGULAR" | "NEXTJS" | "EXPRESS" | "HONO";
+    description?: string;
+  } | null>(null)
+  const router = useRouter();
+  const handleSubmit = async(data:{
+    title:string;
+    template: "REACT" | "VUE" | "ANGULAR" | "NEXTJS" | "EXPRESS" | "HONO";  
+    description?:string;
+  })=>{
+    setSelectedTemplate(data);
+    const res = await createPlayground(data);
+    toast.success("Playground created successfully!");
+    setIsModalOpen(false);
+    router.push(`/playground/${res!.id}`)
+  }
   const cardClassName =
     "group flex flex-row items-center justify-between rounded-lg border bg-muted px-6 py-6 shadow-[0_2px_10px_rgba(0,0,0,0.08)] transition-all duration-300 ease-in-out hover:scale-[1.02] hover:border-[#E93F3F] hover:bg-background hover:shadow-[0_10px_30px_rgba(233,63,63,0.15)] cursor-pointer";
 
@@ -51,7 +70,7 @@ const AddNewButton = () => {
       <TemplateSelectingModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        onSubmit={() => {}}
+        onSubmit={handleSubmit}
       />
       {/* Todo: Implement template selection modal here */}
     </>

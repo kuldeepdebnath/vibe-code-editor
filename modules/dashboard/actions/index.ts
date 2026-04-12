@@ -2,7 +2,6 @@
 import { db } from "@/lib/db";
 import { currentUser } from "@/modules/auth/actions";
 import { revalidatePath } from "next/cache";
-import { isLabelContentAFunction } from "recharts/types/component/Label";
 
 export const getAllPlaygroundForUser =async ()=>{
     const user = await currentUser();
@@ -40,7 +39,7 @@ export const createPlayground = async(data:{
                 title:title,
                 description:description,
                 template:template,
-                userId:user?.id!
+                userId:user!.id!
 
             }
         })
