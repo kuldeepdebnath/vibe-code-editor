@@ -12,22 +12,21 @@ import TemplateSelectingModal from "./template-selecting-modal";
 
 const AddNewButton = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const[selectedTemplate , setSelectedTemplate] = useState<{
-    title:string;
-    template: "REACT" | "VUE" | "ANGULAR" | "NEXTJS" | "EXPRESS" | "HONO";
-    description?: string;
-  } | null>(null)
   const router = useRouter();
   const handleSubmit = async(data:{
     title:string;
     template: "REACT" | "VUE" | "ANGULAR" | "NEXTJS" | "EXPRESS" | "HONO";  
     description?:string;
   })=>{
-    setSelectedTemplate(data);
     const res = await createPlayground(data);
+    if(!res){
+      toast.error("Failed to create playground.");
+      return;
+    }
+
     toast.success("Playground created successfully!");
     setIsModalOpen(false);
-    router.push(`/playground/${res!.id}`)
+    router.push(`/playground/${res.id}`)
   }
   const cardClassName =
     "group flex flex-row items-center justify-between rounded-lg border bg-muted px-6 py-6 shadow-[0_2px_10px_rgba(0,0,0,0.08)] transition-all duration-300 ease-in-out hover:scale-[1.02] hover:border-[#E93F3F] hover:bg-background hover:shadow-[0_10px_30px_rgba(233,63,63,0.15)] cursor-pointer";

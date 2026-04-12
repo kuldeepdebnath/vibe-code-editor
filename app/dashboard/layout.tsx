@@ -24,7 +24,7 @@ export default async function Dashboard({
     playgroundData?.map((item) => ({
       id: item.id,
       name: item.title,
-      starred: false,
+      starred: item.StarMarks?.[0]?.isMarked || false,
       icon: technologyIconMap[item.template] || "Code2",
     })) ?? [];
 

@@ -3,22 +3,68 @@ import { db } from "@/lib/db";
 import { currentUser } from "@/modules/auth/actions";
 import { revalidatePath } from "next/cache";
 
+
+export const toggleStarMarked = async(playgroundId:string, isChecked:boolean) =>{
+    const user = await currentUser();
+    const userId = user?.id;
+
+    if(!userId){
+        return { success:false, error:"User not authenticated", isMarked:!isChecked };
+    }
+
+    try {
+        if(isChecked){
+            await db.starMark.create({
+                data:{
+                    userId,
+                    playgroundId,
+                    isMarked:isChecked,
+                }
+            })
+        } else {
+            await db.starMark.delete({
+                where:{
+                    userId_playgroundId:{
+                        userId,
+                        playgroundId,
+                    }
+                }
+            })
+        }
+
+        revalidatePath("/dashboard")
+        return { success:true, error:null, isMarked:isChecked };
+    } catch (error) {
+        console.log("Error toggling star marked", error);
+        return { success:false, error:"Failed to toggle star marked", isMarked:!isChecked };
+    }
+}
+
+
 export const getAllPlaygroundForUser =async ()=>{
     const user = await currentUser();
 
     try {
         const playground = await db.playground.findMany({
-        where:{
-            userId:user?.id
-        },
-        include:{
-            user:true
-        }
-    });
+            where:{
+                userId:user?.id
+            },
+            include:{
+                user:true,
+                StarMarks:{
+                    where:{
+                        userId:user?.id
+                    },
+                    select:{
+                        isMarked:true  
+                    }
+                },
+            }
+        });
 
         return playground;
 
-    } catch (error) {
+    } catch {
         
     }
 }
@@ -108,3 +154,4 @@ export const duplicateProjectByid = async(id:string) =>{
         console.log("Error duplicatig project",error);
     }
 }
+

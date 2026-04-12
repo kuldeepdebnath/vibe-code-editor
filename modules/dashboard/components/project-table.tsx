@@ -39,6 +39,7 @@ import Link from "next/link"
 import { useState } from "react"
 import { MoreHorizontal, Edit3, Trash2, ExternalLink, Copy, Download, Eye } from "lucide-react"
 import { toast } from "sonner"
+import { MarkedToggleButton } from "./marked-toggle"
 
 
 interface ProjectTableProps {
@@ -59,14 +60,12 @@ export default function ProjectTable({
   onUpdateProject,
   onDeleteProject,
   onDuplicateProject,
-  onMarkasFavorite,
 }: ProjectTableProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [editData, setEditData] = useState<EditProjectData>({ title: "", description: "" })
   const [isLoading, setIsLoading] = useState(false)
-  const [favoutrie, setFavourite] = useState(false)
   
   const handleEditClick = (project: Project) => {
     setSelectedProject(project)
@@ -94,10 +93,6 @@ export default function ProjectTable({
     } finally {
       setIsLoading(false);
     }
-  }
-
-  const handleMarkasFavorite = async (project: Project) => {
-    
   }
 
   const handleDeleteProject = async () => {
@@ -166,7 +161,11 @@ export default function ProjectTable({
                     {project.template}
                   </Badge>
                 </TableCell>
-                <TableCell>{format(new Date(project.createdAt), "MMM d, yyyy")}</TableCell>
+                <TableCell>
+                    <span className="text-sm text-gray-500">
+                      {format(new Date(project.createdAt), "MMM d, yyyy")}
+                    </span>
+                </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-full overflow-hidden">
@@ -191,7 +190,7 @@ export default function ProjectTable({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
                       <DropdownMenuItem asChild>
-                        {/* <MarkedToggleButton markedForRevision={project.Starmark[0]?.isMarked} id={project.id} /> */}
+                        <MarkedToggleButton markedForRevision={project.StarMarks?.[0]?.isMarked} id={project.id}/>
                       </DropdownMenuItem>
                       <DropdownMenuItem asChild>
                         <Link href={`/playground/${project.id}`} className="flex items-center">
