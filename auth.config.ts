@@ -25,5 +25,9 @@ if (process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET) {
 export default {
   secret: process.env.AUTH_SECRET,
   trustHost: true,
+  pages: {
+    signIn: "/auth/sign-in",
+    error: "/auth/sign-in",
+  },
   providers,
 } satisfies NextAuthConfig;

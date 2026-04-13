@@ -26,7 +26,13 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const session = await auth();
+  let session = null;
+
+  try {
+    session = await auth();
+  } catch (error) {
+    console.warn("Auth session lookup failed; continuing without a session.", error);
+  }
 
   return (
     <html lang="en" suppressHydrationWarning>

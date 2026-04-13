@@ -35,7 +35,11 @@ export const getAccountByUserId = async (userId: string) => {
 };
 
 export const currentUser = async () => {
-  const user = await auth();
-
-  return user?.user;
+  try {
+    const user = await auth();
+    return user?.user;
+  } catch (error) {
+    console.warn("Auth lookup failed; returning null user.", error);
+    return null;
+  }
 };
