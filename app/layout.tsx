@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { SessionProvider } from "next-auth/react";
-import { auth } from "@/auth";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -26,34 +24,24 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  let session = null;
-
-  try {
-    session = await auth();
-  } catch (error) {
-    console.warn("Auth session lookup failed; continuing without a session.", error);
-  }
-
   return (
     <html lang="en" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <SessionProvider session={session}>
-          <ThemeProvider
-            attribute="class"
-            defaultTheme="system"
-            enableSystem
-            disableTransitionOnChange
-          >
-            <div className="flex flex-col min-h-screen">
-              <Toaster />      
-              <div className="flex-1">
-                {children}
-              </div>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <div className="flex flex-col min-h-screen">
+            <Toaster />
+            <div className="flex-1">
+              {children}
             </div>
-          </ThemeProvider>
-        </SessionProvider>
+          </div>
+        </ThemeProvider>
       </body>
     </html>
   );

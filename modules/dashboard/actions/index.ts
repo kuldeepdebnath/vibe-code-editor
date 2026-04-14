@@ -2,6 +2,8 @@
 import { db } from "@/lib/db";
 import { currentUser } from "@/modules/auth/actions";
 import { revalidatePath } from "next/cache";
+import { importGitHubRepository } from "../lib/github-import";
+import { Templates } from "@prisma/client";
 
 
 export const toggleStarMarked = async(playgroundId:string, isChecked:boolean) =>{
@@ -94,6 +96,63 @@ export const createPlayground = async(data:{
         console.log(error)
     }
 }
+
+export const createPlaygroundFromGithubRepo = async (data: {
+    repoUrl: string;
+    title?: string;
+    branch?: string;
+}) => {
+    const user = await currentUser();
+
+    if (!user?.id) {
+        throw new Error("You must be signed in to import a repository.");
+    }
+
+    try {
+        const githubAccount = await db.account.findFirst({
+            where: {
+                userId: user.id,
+                provider: "github",
+            },
+            select: {
+                access_token: true,
+            },
+        });
+
+        const importedRepo = await importGitHubRepository(
+            data,
+            githubAccount?.access_token ?? undefined,
+        );
+
+        const playground = await db.playground.create({
+            data: {
+                title: importedRepo.title,
+                description: importedRepo.description,
+                template: importedRepo.template ?? Templates.REACT,
+                userId: user.id,
+            },
+        });
+
+        await db.templateFile.upsert({
+            where: {
+                playgroundId: playground.id,
+            },
+            update: {
+                content: JSON.stringify(importedRepo.templateData),
+            },
+            create: {
+                playgroundId: playground.id,
+                content: JSON.stringify(importedRepo.templateData),
+            },
+        });
+
+        revalidatePath("/dashboard");
+        return playground;
+    } catch (error) {
+        console.log("Error importing GitHub repository", error);
+        throw error;
+    }
+};
 
 export const deleteprojectById =async(id:string)=>{
     try {

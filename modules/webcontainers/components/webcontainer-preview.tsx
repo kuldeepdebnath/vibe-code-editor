@@ -1,12 +1,19 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { CheckCircle, Loader2, XCircle } from "lucide-react";
+import { WebContainer } from "@webcontainer/api";
+
+import { Progress } from "@/components/ui/progress";
+import TerminalComponent, { type TerminalRef } from "./terminal";
 import type { TemplateFolder } from "@/modules/playgrounds/lib/path-to-json";
 import { transformToWebContainerFormat } from "../hooks/transformer";
-import { CheckCircle, Loader2, XCircle } from "lucide-react";
-import { Progress } from "@/components/ui/progress";
-import TerminalComponent from "./terminal";
-import { WebContainer } from "@webcontainer/api";
+
+type StartCommand = {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+};
 
 interface WebContainerPreviewProps {
   templateData: TemplateFolder;
@@ -15,332 +22,304 @@ interface WebContainerPreviewProps {
   error: string | null;
   instance: WebContainer | null;
   writeFileSync: (path: string, content: string) => Promise<void>;
-  forceResetup?: boolean; // Optional prop to force re-setup
+  forceResetup?: boolean;
 }
+
+const findPackageJsonPath = (
+  folder: TemplateFolder,
+  currentPath = "",
+): string | null => {
+  for (const item of folder.items) {
+    if ("folderName" in item) {
+      const nextPath = currentPath ? `${currentPath}/${item.folderName}` : item.folderName;
+      const result = findPackageJsonPath(item, nextPath);
+      if (result) return result;
+      continue;
+    }
+
+    if (item.filename === "package" && item.fileExtension === "json") {
+      return currentPath ? `${currentPath}/package.json` : "package.json";
+    }
+  }
+
+  return null;
+};
+
+const routeFilePattern = /(?:^|\/)app(?:\/.*)?\/page\.(?:[cm]?[jt]sx?)$/;
+const hasClientDirective = (content: string) =>
+  /^\s*["']use client["'];?/m.test(content);
+
+const getClientPageWrapper = (importPath: string) => `import ClientPage from "${importPath}";
+
+export const dynamic = "force-dynamic";
+
+export default function Page() {
+  return <ClientPage />;
+}
+`;
+
+const toGeneratedClientPath = (currentPath: string, clientFileName: string) => {
+  const generatedRoot = "vibe-generated";
+  return currentPath ? `${generatedRoot}/${currentPath}/${clientFileName}` : `${generatedRoot}/${clientFileName}`;
+};
+
+const getRelativeImportPath = (fromDir: string, toFile: string) => {
+  const fromParts = fromDir.split("/").filter(Boolean);
+  const toParts = toFile.split("/").filter(Boolean);
+
+  let shared = 0;
+  while (shared < fromParts.length && shared < toParts.length && fromParts[shared] === toParts[shared]) {
+    shared += 1;
+  }
+
+  const up = fromParts.length - shared;
+  const down = toParts.slice(shared).join("/");
+  return `${up > 0 ? `${"../".repeat(up)}` : "./"}${down}`;
+};
+
+const rewriteRoutePropNames = (content: string) =>
+  content
+    .replace(/\bsearchParams\b/g, "routeSearchParams")
+    .replace(/\bparams\b/g, "routeParams");
+
+const prepareClientRouteFiles = async (
+  instance: WebContainer,
+  folder: TemplateFolder,
+  currentPath = "",
+): Promise<void> => {
+  for (const item of folder.items) {
+    if ("folderName" in item) {
+      const nextPath = currentPath ? `${currentPath}/${item.folderName}` : item.folderName;
+      await prepareClientRouteFiles(instance, item, nextPath);
+      continue;
+    }
+
+    const fileName = `${item.filename}${item.fileExtension ? "." + item.fileExtension : ""}`;
+    const filePath = currentPath ? `${currentPath}/${fileName}` : fileName;
+    const isRoutePage = routeFilePattern.test(filePath);
+
+    if (!isRoutePage || !hasClientDirective(item.content)) {
+      continue;
+    }
+
+    const extIndex = fileName.lastIndexOf(".");
+    const baseName = extIndex === -1 ? fileName : fileName.slice(0, extIndex);
+    const extension = extIndex === -1 ? "" : fileName.slice(extIndex);
+    const clientFileName = `${baseName}.client${extension}`;
+    const generatedClientFilePath = toGeneratedClientPath(currentPath, clientFileName);
+    const wrapperImportPath = getRelativeImportPath(currentPath, generatedClientFilePath);
+
+    const generatedClientDir = generatedClientFilePath.split("/").slice(0, -1).join("/");
+
+    await instance.fs.mkdir(generatedClientDir || ".", { recursive: true }).catch(() => {});
+    await instance.fs.writeFile(generatedClientFilePath, rewriteRoutePropNames(item.content));
+    await instance.fs.writeFile(filePath, getClientPageWrapper(wrapperImportPath));
+  }
+};
+
+const collectStartCommands = (
+  scripts: Record<string, string>,
+  packageJson: {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+    main?: string;
+  },
+): StartCommand[] => {
+  const hasNext = Boolean(packageJson.dependencies?.next || packageJson.devDependencies?.next);
+  const hasVite = Boolean(packageJson.dependencies?.vite || packageJson.devDependencies?.vite);
+  const hasReactScripts = Boolean(
+    packageJson.dependencies?.["react-scripts"] || packageJson.devDependencies?.["react-scripts"],
+  );
+  const hasExpress = Boolean(packageJson.dependencies?.express || packageJson.devDependencies?.express);
+  const commands: StartCommand[] = [];
+
+  if (hasNext) {
+    commands.push({ command: "npm", args: ["exec", "--", "next", "build", "--webpack"] });
+    commands.push({ command: "npm", args: ["exec", "--", "next", "start", "--hostname", "0.0.0.0", "--port", "3000"] });
+  } else if (scripts.dev) {
+    if (hasVite) commands.push({ command: "npm", args: ["run", "dev", "--", "--host", "0.0.0.0"] });
+    if (hasReactScripts) commands.push({ command: "npm", args: ["run", "dev"], env: { HOST: "0.0.0.0", BROWSER: "none" } });
+    if (hasExpress) commands.push({ command: "npm", args: ["run", "dev"], env: { HOST: "0.0.0.0", PORT: "3000" } });
+    commands.push({ command: "npm", args: ["run", "dev"], env: { HOST: "0.0.0.0", PORT: "3000" } });
+  }
+
+  if (scripts.start) {
+    if (hasReactScripts) commands.push({ command: "npm", args: ["run", "start"], env: { HOST: "0.0.0.0", BROWSER: "none" } });
+    if (hasNext) commands.push({ command: "npm", args: ["run", "start", "--", "--hostname", "0.0.0.0", "--port", "3000"] });
+    commands.push({ command: "npm", args: ["run", "start"], env: { HOST: "0.0.0.0", PORT: "3000" } });
+  }
+
+  if (scripts.preview) {
+    if (hasVite) commands.push({ command: "npm", args: ["run", "preview", "--", "--host", "0.0.0.0"] });
+    commands.push({ command: "npm", args: ["run", "preview"], env: { HOST: "0.0.0.0", PORT: "3000" } });
+  }
+
+  if (packageJson.main) {
+    commands.push({ command: "npm", args: ["exec", "--", "node", packageJson.main], env: { HOST: "0.0.0.0", PORT: "3000" } });
+  }
+
+  return commands;
+};
 
 const WebContainerPreview: React.FC<WebContainerPreviewProps> = ({
   templateData,
   error,
   instance,
   isLoading,
-  serverUrl,
-  writeFileSync,
   forceResetup = false,
 }) => {
-  const [previewUrl, setPreviewUrl] = useState<string>("");
-  const [loadingState, setLoadingState] = useState({
-    transforming: false,
-    mounting: false,
-    installing: false,
-    starting: false,
-    ready: false,
-  });
+  const [previewUrl, setPreviewUrl] = useState("");
   const [currentStep, setCurrentStep] = useState(0);
-  const totalSteps = 4;
   const [setupError, setSetupError] = useState<string | null>(null);
   const [isSetupComplete, setIsSetupComplete] = useState(false);
   const [isSetupInProgress, setIsSetupInProgress] = useState(false);
-  
-  // Ref to access terminal methods
-  const terminalRef = useRef<any>(null);
+  const terminalRef = useRef<TerminalRef | null>(null);
 
-  // Reset setup state when forceResetup changes
   useEffect(() => {
     if (forceResetup) {
-      setIsSetupComplete(false);
-      setIsSetupInProgress(false);
       setPreviewUrl("");
       setCurrentStep(0);
-      setLoadingState({
-        transforming: false,
-        mounting: false,
-        installing: false,
-        starting: false,
-        ready: false,
-      });
+      setSetupError(null);
+      setIsSetupComplete(false);
+      setIsSetupInProgress(false);
     }
   }, [forceResetup]);
 
-  const getStartCommand = (
-    scripts: Record<string, string>,
-    packageJson: {
-      dependencies?: Record<string, string>;
-      devDependencies?: Record<string, string>;
-      main?: string;
-    }
-  ): { args: string[]; env?: Record<string, string> } | null => {
-    const hasNext = Boolean(packageJson.dependencies?.next || packageJson.devDependencies?.next);
-    const hasVite = Boolean(packageJson.dependencies?.vite || packageJson.devDependencies?.vite);
-    const hasReactScripts = Boolean(
-      packageJson.dependencies?.["react-scripts"] || packageJson.devDependencies?.["react-scripts"]
-    );
-    const hasExpress = Boolean(packageJson.dependencies?.express || packageJson.devDependencies?.express);
-
-    if (scripts.dev) {
-      if (hasNext) return { args: ["run", "dev", "--", "--hostname", "0.0.0.0"] };
-      if (hasVite) return { args: ["run", "dev", "--", "--host", "0.0.0.0"] };
-      if (hasReactScripts) return { args: ["run", "dev"], env: { HOST: "0.0.0.0", BROWSER: "none" } };
-      if (hasExpress) return { args: ["run", "dev"], env: { HOST: "0.0.0.0", PORT: "3000" } };
-      
-      return { args: ["run", "dev"], env: { HOST: "0.0.0.0", PORT: "3000" } };
-    }
-
-    if (scripts.start) {
-      if (hasReactScripts) return { args: ["run", "start"], env: { HOST: "0.0.0.0", BROWSER: "none" } };
-      if (hasNext) return { args: ["run", "start", "--", "--hostname", "0.0.0.0"] };
-      return { args: ["run", "start"], env: { HOST: "0.0.0.0", PORT: "3000" } };
-    }
-
-    if (scripts.preview) {
-      if (hasVite) return { args: ["run", "preview", "--", "--host", "0.0.0.0"] };
-      return { args: ["run", "preview"], env: { HOST: "0.0.0.0", PORT: "3000" } };
-    }
-
-    // Default node fallback for simple express/node servers
-    if (packageJson.main) {
-        return { args: ["exec", "--", "node", packageJson.main], env: { HOST: "0.0.0.0", PORT: "3000" }};
-    }
-
-    return null;
-  };
-
-  const getInstallCommand = (hasLockfile: boolean) =>
-    hasLockfile ? ["ci", "--no-audit", "--no-fund"] : ["install", "--no-audit", "--no-fund"];
-
   useEffect(() => {
     async function setupContainer() {
-      // Don't run setup if it's already complete or in progress
       if (!instance || isSetupComplete || isSetupInProgress) return;
 
       try {
         setIsSetupInProgress(true);
         setSetupError(null);
-        
-        // Check if server is already running by testing if files are already mounted
-        try {
-          const packageJsonExists = await instance.fs.readFile('package.json', 'utf8');
-          if (packageJsonExists) {
-            // Files are already mounted, just reconnect to existing server
-            if (terminalRef.current?.writeToTerminal) {
-              terminalRef.current.writeToTerminal("🔄 Reconnecting to existing WebContainer session...\r\n");
-            }
-            
-            // Check if server is already running
-            instance.on("server-ready", (port: number, url: string) => {
-              console.log(`Reconnected to server on port ${port} at ${url}`);
-              if (terminalRef.current?.writeToTerminal) {
-                terminalRef.current.writeToTerminal(`🌐 Reconnected to server at ${url}\r\n`);
-              }
-              setPreviewUrl(url);
-              setLoadingState((prev) => ({
-                ...prev,
-                starting: false,
-                ready: true,
-              }));
-              setIsSetupComplete(true);
-              setIsSetupInProgress(false);
-            });
-            
-            setCurrentStep(4);
-            setLoadingState((prev) => ({ ...prev, starting: true }));
-            return;
-          }
-        } catch (e) {
-          // Files don't exist, proceed with normal setup
-        }
-        
-        // Step 1: Transform data
-        setLoadingState((prev) => ({ ...prev, transforming: true }));
-        setCurrentStep(1);
-        
-        // Write to terminal
-        if (terminalRef.current?.writeToTerminal) {
-          terminalRef.current.writeToTerminal("🔄 Transforming template data...\r\n");
-        }
 
-        // @ts-ignore
+        setCurrentStep(1);
+        terminalRef.current?.writeToTerminal?.("Transforming template data...\r\n");
         const files = transformToWebContainerFormat(templateData);
 
-        setLoadingState((prev) => ({
-          ...prev,
-          transforming: false,
-          mounting: true,
-        }));
         setCurrentStep(2);
-
-        // Step 2: Mount files
-        if (terminalRef.current?.writeToTerminal) {
-          terminalRef.current.writeToTerminal("📁 Mounting files to WebContainer...\r\n");
-        }
-        
+        terminalRef.current?.writeToTerminal?.("Mounting files...\r\n");
         await instance.mount(files);
-        
-        if (terminalRef.current?.writeToTerminal) {
-          terminalRef.current.writeToTerminal("✅ Files mounted successfully\r\n");
+        terminalRef.current?.writeToTerminal?.("Files mounted successfully\r\n");
+
+        await prepareClientRouteFiles(instance, templateData);
+        terminalRef.current?.writeToTerminal?.("Client route files normalized\r\n");
+
+        const packageJsonPath = findPackageJsonPath(templateData);
+        if (!packageJsonPath) {
+          throw new Error("No package.json found in this project.");
         }
 
-        setLoadingState((prev) => ({
-          ...prev,
-          mounting: false,
-          installing: true,
-        }));
+        const packageDirectory = packageJsonPath.includes("/")
+          ? packageJsonPath.split("/").slice(0, -1).join("/")
+          : ".";
+
         setCurrentStep(3);
-
-        // Step 3: Install dependencies
-        if (terminalRef.current?.writeToTerminal) {
-          terminalRef.current.writeToTerminal("📦 Installing dependencies...\r\n");
-        }
-        
-        const packageJsonStr = await instance.fs.readFile("package.json", "utf8");
+        terminalRef.current?.writeToTerminal?.(`Reading ${packageJsonPath}...\r\n`);
+        const packageJsonStr = await instance.fs.readFile(packageJsonPath, "utf8");
         const packageJson = JSON.parse(packageJsonStr) as {
           scripts?: Record<string, string>;
           dependencies?: Record<string, string>;
           devDependencies?: Record<string, string>;
+          main?: string;
         };
 
-        const scripts = packageJson.scripts ?? {};
-        const startCommand = getStartCommand(scripts, packageJson);
-
-        if (!startCommand) {
-          throw new Error(
-            "No runnable script found in package.json. Expected dev, start, or preview."
-          );
+        const commands = collectStartCommands(packageJson.scripts ?? {}, packageJson);
+        if (commands.length === 0) {
+          throw new Error("No runnable script found in package.json.");
         }
 
-        const lockfileExists = await instance.fs
-          .readFile("package-lock.json", "utf8")
-          .then(() => true)
-          .catch(() => false);
+        const lockfilePath = packageDirectory === "." ? "package-lock.json" : `${packageDirectory}/package-lock.json`;
+        const hasLockfile = await instance.fs.readFile(lockfilePath, "utf8").then(() => true).catch(() => false);
+        const installArgs = hasLockfile ? ["ci", "--no-audit", "--no-fund"] : ["install", "--no-audit", "--no-fund"];
 
-        const installArgs = getInstallCommand(lockfileExists);
+        terminalRef.current?.writeToTerminal?.(
+          hasLockfile
+            ? "Using package-lock.json for install...\r\n"
+            : "No package-lock.json found, installing from scratch...\r\n",
+        );
 
-        if (terminalRef.current?.writeToTerminal) {
-          terminalRef.current.writeToTerminal(
-            lockfileExists
-              ? "Using package-lock.json for install...\r\n"
-              : "No package-lock.json found, installing from scratch...\r\n"
-          );
-        }
-        
-        const installProcess = await instance.spawn("npm", installArgs);
+        const installProcess = await instance.spawn("npm", installArgs, {
+          cwd: packageDirectory === "." ? undefined : packageDirectory,
+        });
 
-        // Stream install output to terminal
-        installProcess.output.pipeTo(
+        await installProcess.output.pipeTo(
           new WritableStream({
             write(data) {
-              // Write directly to terminal
-              if (terminalRef.current?.writeToTerminal) {
-                terminalRef.current.writeToTerminal(data);
-              }
+              terminalRef.current?.writeToTerminal?.(data);
             },
-          })
+          }),
         );
 
         const installExitCode = await installProcess.exit;
-
         if (installExitCode !== 0) {
           throw new Error(`Failed to install dependencies. Exit code: ${installExitCode}`);
         }
 
-        if (terminalRef.current?.writeToTerminal) {
-          terminalRef.current.writeToTerminal("✅ Dependencies installed successfully\r\n");
-        }
-
-        setLoadingState((prev) => ({
-          ...prev,
-          installing: false,
-          starting: true,
-        }));
         setCurrentStep(4);
+        terminalRef.current?.writeToTerminal?.("Starting development server...\r\n");
 
-        // Step 4: Start the server
-        if (terminalRef.current?.writeToTerminal) {
-          terminalRef.current.writeToTerminal("🚀 Starting development server...\r\n");
-        }
-        
-        const startProcess = await instance.spawn("npm", startCommand.args, {
-          env: startCommand.env,
-        });
-
-        // Listen for server ready event
-        instance.on("server-ready", (port: number, url: string) => {
-          console.log(`Server ready on port ${port} at ${url}`);
-          if (terminalRef.current?.writeToTerminal) {
-            terminalRef.current.writeToTerminal(`🌐 Server ready at ${url}\r\n`);
-          }
+        let resolved = false;
+        const unsubscribe = instance.on("server-ready", (_port: number, url: string) => {
+          resolved = true;
           setPreviewUrl(url);
-          setLoadingState((prev) => ({
-            ...prev,
-            starting: false,
-            ready: true,
-          }));
           setIsSetupComplete(true);
           setIsSetupInProgress(false);
+          terminalRef.current?.writeToTerminal?.(`Server ready at ${url}\r\n`);
         });
 
-        // Handle start process output - stream to terminal
-        startProcess.output.pipeTo(
-          new WritableStream({
-            write(data) {
-              if (terminalRef.current?.writeToTerminal) {
-                terminalRef.current.writeToTerminal(data);
-              }
-            },
-          })
-        ).catch((pipeError) => {
-          console.error("Pipe error:", pipeError);
-        });
+        for (const [index, command] of commands.entries()) {
+          terminalRef.current?.writeToTerminal?.(
+            `Trying ${command.command} ${command.args.join(" ")}...\r\n`,
+          );
 
-        // Handle premature exits
-        startProcess.exit.then((code) => {
-          if (!isSetupComplete) {
-            if (code !== 0) {
-               if (terminalRef.current?.writeToTerminal) {
-                 terminalRef.current.writeToTerminal(`\r\n❌ Development server exited unexpectedly with code ${code}\r\n`);
-               }
-               setSetupError(`Development server exited unexpectedly with code ${code}`);
-               setIsSetupInProgress(false);
-               setLoadingState({
-                  transforming: false,
-                  mounting: false,
-                  installing: false,
-                  starting: false,
-                  ready: false,
-               });
-            }
+          const process = await instance.spawn(command.command, command.args, {
+            env: command.env,
+            cwd: packageDirectory === "." ? undefined : packageDirectory,
+          });
+
+          await process.output.pipeTo(
+            new WritableStream({
+              write(data) {
+                terminalRef.current?.writeToTerminal?.(data);
+              },
+            }),
+          ).catch((pipeError) => {
+            console.error("Pipe error:", pipeError);
+          });
+
+          const exitCode = await process.exit.catch(() => 1);
+          if (resolved) break;
+
+          terminalRef.current?.writeToTerminal?.(
+            `Start attempt ${index + 1} failed with code ${exitCode}\r\n`,
+          );
+
+          try {
+            process.kill();
+          } catch {
+            // ignore
           }
-        }).catch(() => {});
-
-      } catch (err) {
-        console.error("Error setting up container:", err);
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        
-        if (terminalRef.current?.writeToTerminal) {
-          terminalRef.current.writeToTerminal(`❌ Error: ${errorMessage}\r\n`);
         }
-        
-        setSetupError(errorMessage);
+
+        unsubscribe();
+
+        if (!resolved) {
+          throw new Error("Development server exited unexpectedly with code 1");
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("Error setting up container:", err);
+        terminalRef.current?.writeToTerminal?.(`Error: ${message}\r\n`);
+        setSetupError(message);
         setIsSetupInProgress(false);
-        setLoadingState({
-          transforming: false,
-          mounting: false,
-          installing: false,
-          starting: false,
-          ready: false,
-        });
+        setIsSetupComplete(false);
+        setCurrentStep(0);
       }
     }
 
     setupContainer();
-  }, [instance, templateData, isSetupComplete, isSetupInProgress]);
-
-  // Cleanup function to prevent memory leaks
-  useEffect(() => {
-    return () => {
-      // Don't kill processes or cleanup when component unmounts
-      // The WebContainer should persist across component re-mounts
-    };
-  }, []);
+  }, [instance, isSetupComplete, isSetupInProgress, templateData]);
 
   if (isLoading) {
     return (
@@ -371,28 +350,9 @@ const WebContainerPreview: React.FC<WebContainerPreviewProps> = ({
   }
 
   const getStepIcon = (stepIndex: number) => {
-    if (stepIndex < currentStep) {
-      return <CheckCircle className="h-5 w-5 text-green-500" />;
-    } else if (stepIndex === currentStep) {
-      return <Loader2 className="h-5 w-5 animate-spin text-blue-500" />;
-    } else {
-      return <div className="h-5 w-5 rounded-full border-2 border-gray-300" />;
-    }
-  };
-
-  const getStepText = (stepIndex: number, label: string) => {
-    const isActive = stepIndex === currentStep;
-    const isComplete = stepIndex < currentStep;
-    
-    return (
-      <span className={`text-sm font-medium ${
-        isComplete ? 'text-green-600' : 
-        isActive ? 'text-blue-600' : 
-        'text-gray-500'
-      }`}>
-        {label}
-      </span>
-    );
+    if (stepIndex < currentStep) return <CheckCircle className="h-5 w-5 text-green-500" />;
+    if (stepIndex === currentStep) return <Loader2 className="h-5 w-5 animate-spin text-blue-500" />;
+    return <div className="h-5 w-5 rounded-full border-2 border-gray-300" />;
   };
 
   return (
@@ -400,36 +360,28 @@ const WebContainerPreview: React.FC<WebContainerPreviewProps> = ({
       {!previewUrl ? (
         <div className="h-full flex flex-col">
           <div className="w-full max-w-md p-6 m-5 rounded-lg bg-white dark:bg-zinc-800 shadow-sm mx-auto">
-           
-
-            <Progress
-              value={(currentStep / totalSteps) * 100}
-              className="h-2 mb-6"
-            />
-
+            <Progress value={(currentStep / 4) * 100} className="h-2 mb-6" />
             <div className="space-y-4 mb-6">
               <div className="flex items-center gap-3">
                 {getStepIcon(1)}
-                {getStepText(1, "Transforming template data")}
+                <span className="text-sm font-medium">Transforming template data</span>
               </div>
               <div className="flex items-center gap-3">
                 {getStepIcon(2)}
-                {getStepText(2, "Mounting files")}
+                <span className="text-sm font-medium">Mounting files</span>
               </div>
               <div className="flex items-center gap-3">
                 {getStepIcon(3)}
-                {getStepText(3, "Installing dependencies")}
+                <span className="text-sm font-medium">Installing dependencies</span>
               </div>
               <div className="flex items-center gap-3">
                 {getStepIcon(4)}
-                {getStepText(4, "Starting development server")}
+                <span className="text-sm font-medium">Starting development server</span>
               </div>
             </div>
           </div>
-
-          {/* Terminal */}
           <div className="flex-1 p-4">
-            <TerminalComponent 
+            <TerminalComponent
               ref={terminalRef}
               webContainerInstance={instance}
               theme="dark"
@@ -439,18 +391,11 @@ const WebContainerPreview: React.FC<WebContainerPreviewProps> = ({
         </div>
       ) : (
         <div className="h-full flex flex-col">
-          {/* Preview */}
           <div className="flex-1">
-            <iframe
-              src={previewUrl}
-              className="w-full h-full border-none"
-              title="WebContainer Preview"
-            />
+            <iframe src={previewUrl} className="w-full h-full border-none" title="WebContainer Preview" />
           </div>
-          
-          {/* Terminal at bottom when preview is ready */}
           <div className="h-64 border-t">
-            <TerminalComponent 
+            <TerminalComponent
               ref={terminalRef}
               webContainerInstance={instance}
               theme="dark"
