@@ -1,8 +1,10 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback ,useRef} from "react";
 import { useParams } from "next/navigation";
 import { usePlayground } from "@/modules/playgrounds/hooks/usePlayground";
 import type { TemplateFile, TemplateFolder } from "@/modules/playgrounds/lib/path-to-json";
+import { findFilePath } from "@/modules/playgrounds/lib";
+import { toast } from "sonner";
 import {
   Tooltip,
   TooltipContent,
@@ -14,7 +16,8 @@ import { Separator } from "@/components/ui/separator";
 import { TemplateFileTree } from "@/modules/playgrounds/components/playground-explorer";
 import { useFileExplorer } from "@/modules/playgrounds/hooks/useFileExplorer";
 import { Button } from "@/vibecode-starters/vite-shadcn/src/components/ui/button";
-import { Bot, FileText, Save, Settings, X } from "lucide-react";
+import { AlertCircle, Bot, FileText, Save, Settings, X, FolderOpen } from "lucide-react";
+import { LoadingStep } from "@/modules/playgrounds/components/loader";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -79,7 +82,7 @@ const MainPlaygroundPage = () => {
         : "";
   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
 
-  const { playgroundData, templateData, saveTemplateData } = usePlayground(id);
+  const { playgroundData, templateData, saveTemplateData, error, isLoading } = usePlayground(id);
 
   const {
     activeFileId,
@@ -92,6 +95,13 @@ const MainPlaygroundPage = () => {
     setPlaygroundId,
     setTemplateData,
     updateFileContent,
+    setOpenFiles,
+    handleAddFile,
+    handleAddFolder,
+    handleDeleteFile,
+    handleDeleteFolder,
+    handleRenameFile,
+    handleRenameFolder,
   } = useFileExplorer();
 
   
@@ -102,6 +112,10 @@ const MainPlaygroundPage = () => {
     instance,
     writeFileSync,
   } = useWebContainer({ templateData });
+
+
+  
+  const lastSyncedContent = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     setPlaygroundId(id);
@@ -125,11 +139,32 @@ const MainPlaygroundPage = () => {
     }
   }, [templateData, explorerTemplateData, openFiles.length, openFile]);
 
-  const handleSave = async () => {
-    const dataToSave = explorerTemplateData || templateData;
-    if (!dataToSave) return;
-    await saveTemplateData(dataToSave);
-  };
+  // create wrapper functions that pass saveTemplateData
+  const WrappedHandleAddFile = useCallback((newFile: TemplateFile, parentPath: string) => {
+    handleAddFile(newFile, parentPath, writeFileSync, instance!, saveTemplateData);
+  }, [handleAddFile, writeFileSync, instance, saveTemplateData]);
+
+  const WrappedHandleAddFolder = useCallback((newFolder: TemplateFolder, parentPath: string) => {
+    handleAddFolder(newFolder, parentPath, instance!, saveTemplateData);
+  }, [handleAddFolder, instance, saveTemplateData]);
+
+  const WrappedHandleDeleteFile = useCallback((file: TemplateFile, parentPath: string) => {
+    handleDeleteFile(file, parentPath, saveTemplateData);
+  }, [handleDeleteFile, saveTemplateData]);
+
+  const WrappedHandleDeleteFolder = useCallback((folder: TemplateFolder, parentPath: string) => {
+    handleDeleteFolder(folder, parentPath, saveTemplateData);
+  }, [handleDeleteFolder, saveTemplateData]);
+
+  const WrappedHandleRenameFile = useCallback((file: TemplateFile, newFilename: string, newExtension: string, parentPath: string) => {
+    handleRenameFile(file, newFilename, newExtension, parentPath, saveTemplateData);
+  }, [handleRenameFile, saveTemplateData]);
+
+  const WrappedHandleRenameFolder = useCallback((folder: TemplateFolder, newFolderName: string, parentPath: string) => {
+    handleRenameFolder(folder, newFolderName, parentPath, saveTemplateData);
+  }, [handleRenameFolder, saveTemplateData]); 
+
+
 
   const activeFile = openFiles.find((file) => file.id === activeFileId) || null;
   const hasUnsavedChanges = openFiles.some((file) => file.hasUnsavedChanges);
@@ -143,6 +178,179 @@ const MainPlaygroundPage = () => {
     });
   };
 
+    const handleFileSelect = (file: TemplateFile) => {
+    openFile(file);
+  };
+
+  const handleSave = useCallback(
+    async (fileIdOrEvent?: string | React.MouseEvent | KeyboardEvent) => {
+      const fileId = typeof fileIdOrEvent === "string" ? fileIdOrEvent : undefined;
+      const targetFileId = fileId || activeFileId;
+      if (!targetFileId) return;
+
+      const fileToSave = openFiles.find((f) => f.id === targetFileId);
+      if (!fileToSave) return;
+
+      const latestTemplateData = useFileExplorer.getState().templateData;
+      if (!latestTemplateData) return;
+
+      try {
+        const filePath = findFilePath(fileToSave, latestTemplateData);
+        if (!filePath) {
+          toast.error(
+            `Could not find path for file: ${fileToSave.filename}.${fileToSave.fileExtension}`
+          );
+          return;
+        }
+
+        // Update file content in template data (clone for immutability)
+        const updatedTemplateData = JSON.parse(
+          JSON.stringify(latestTemplateData)
+        );
+        const updateItemsContent = (items: any[]): any[] =>
+          items.map((item) => {
+            if ("folderName" in item) {
+              return { ...item, items: updateItemsContent(item.items) };
+            } else if (
+              item.filename === fileToSave.filename &&
+              item.fileExtension === fileToSave.fileExtension
+            ) {
+              return { ...item, content: fileToSave.content };
+            }
+            return item;
+          });
+        updatedTemplateData.items = updateItemsContent(
+          updatedTemplateData.items
+        );
+
+        // Sync with WebContainer
+        if (writeFileSync) {
+          await writeFileSync(filePath, fileToSave.content);
+          lastSyncedContent.current.set(fileToSave.id, fileToSave.content);
+          if (instance && instance.fs) {
+            await instance.fs.writeFile(filePath, fileToSave.content);
+          }
+        }
+
+        // Use saveTemplateData to persist changes
+        await saveTemplateData(updatedTemplateData);
+        setTemplateData(updatedTemplateData);
+
+        // Update open files
+        const updatedOpenFiles = openFiles.map((f) =>
+          f.id === targetFileId
+            ? {
+                ...f,
+                content: fileToSave.content,
+                originalContent: fileToSave.content,
+                hasUnsavedChanges: false,
+              }
+            : f
+        );
+        setOpenFiles(updatedOpenFiles);
+
+        toast.success(
+          `Saved ${fileToSave.filename}.${fileToSave.fileExtension}`
+        );
+      } catch (error) {
+        console.error("Error saving file:", error);
+        toast.error(
+          `Failed to save ${fileToSave.filename}.${fileToSave.fileExtension}`
+        );
+        throw error;
+      }
+    },
+    [
+      activeFileId,
+      openFiles,
+      writeFileSync,
+      instance,
+      saveTemplateData,
+      setTemplateData,
+      setOpenFiles,
+    ]
+  );
+
+  const handleSaveAll = async () => {
+    const unsavedFiles = openFiles.filter((f) => f.hasUnsavedChanges);
+
+    if (unsavedFiles.length === 0) {
+      toast.info("No unsaved changes");
+      return;
+    }
+
+    try {
+      await Promise.all(unsavedFiles.map((f) => handleSave(f.id)));
+      toast.success(`Saved ${unsavedFiles.length} file(s)`);
+    } catch (error) {
+      toast.error("Failed to save some files");
+    }
+  };
+
+  // Add event to save file by click ctrl + s
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === "s") {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleSave]);
+
+  if(error){
+    return (
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-4rem0] p-4">
+        <AlertCircle className="h-12 w-12 text-red-500 mb-4"/>
+        <h2 className="text-xl font-semibold mb-2">Failed to load playground</h2>
+        <p className="text-muted-foreground mb-4">{error}</p>
+        <Button onClick={() => window.location.reload()}>Reload</Button>
+
+      </div>
+    );
+  }
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-4rem)] p-4">
+        <div className="w-full max-w-md p-6 rounded-lg shadow-sm border">
+          <h2 className="text-xl font-semibold mb-6 text-center">
+            Loading Playground
+          </h2>
+          <div className="mb-8">
+            <LoadingStep
+              currentStep={1}
+              step={1}
+              label="Loading playground data"
+            />
+            <LoadingStep
+              currentStep={2}
+              step={2}
+              label="Setting up environment"
+            />
+            <LoadingStep currentStep={3} step={3} label="Ready to code" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+    // No template data
+  if (!templateData) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-4rem)] p-4">
+        <FolderOpen className="h-12 w-12 text-amber-500 mb-4" />
+        <h2 className="text-xl font-semibold text-amber-600 mb-2">
+          No template data available
+        </h2>
+        <Button onClick={() => window.location.reload()} variant="outline">
+          Reload Template
+        </Button>
+      </div>
+    );
+  }
+
+
   return (
     <TooltipProvider>
       <>
@@ -153,12 +361,12 @@ const MainPlaygroundPage = () => {
               onFileSelect={openFile}
               selectedFile={activeFile || undefined}
               title="File Explorer"
-              onAddFile={() => {}}
-              onAddFolder={() => {}}
-              onDeleteFile={() => {}}
-              onDeleteFolder={() => {}}
-              onRenameFile={() => {}}
-              onRenameFolder={() => {}}
+              onAddFile={WrappedHandleAddFile}
+              onAddFolder={WrappedHandleAddFolder}
+              onDeleteFile={WrappedHandleDeleteFile}
+              onDeleteFolder={WrappedHandleDeleteFolder}
+              onRenameFile={WrappedHandleRenameFile}
+              onRenameFolder={WrappedHandleRenameFolder}
             />
           ) : null}
           <SidebarInset className="flex-1">
@@ -195,7 +403,7 @@ const MainPlaygroundPage = () => {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleSave()}
+                        onClick={handleSave}
                         disabled={!hasUnsavedChanges}
                       >
                         <Save className="h-4 w-4" /> All
@@ -289,7 +497,9 @@ const MainPlaygroundPage = () => {
                         <PlaygroundEditor
                           activeFile={activeFile ?? undefined}
                           content={activeFile?.content || ""}
-                          onContentChange={handleEditorContentChange}
+                          onContentChange={(value)=>{
+                            activeFileId && updateFileContent(activeFileId,value)  
+                          }}
                         />
                       </ResizablePanel>
 

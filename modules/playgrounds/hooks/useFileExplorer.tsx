@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { TemplateFile, TemplateFolder } from "../lib/path-to-json";
 import { toast } from "sonner";
 import { generateFileId } from "../lib";
+import type { WebContainer } from "@webcontainer/api";
 
 
 
@@ -25,13 +26,13 @@ interface FileExplorerState {
     newFile: TemplateFile,
     parentPath: string,
     writeFileSync: (filePath: string, content: string) => Promise<void>,
-    instance: PlaygroundInstance,
+    instance: WebContainer,
     saveTemplateData: (data: TemplateFolder) => Promise<void>
   ) => Promise<void>;
   handleAddFolder: (
     newFolder: TemplateFolder, 
     parentPath: string, 
-    instance: PlaygroundInstance, 
+    instance: WebContainer, 
     saveTemplateData: (data: TemplateFolder) => Promise<void>
   ) => Promise<void>;
   handleDeleteFile: (
@@ -67,11 +68,7 @@ interface OpenFile extends TemplateFile {
   originalContent: string;
 }
 
-type PlaygroundInstance = {
-  fs?: {
-    mkdir: (folderPath: string, options?: { recursive?: boolean }) => Promise<void>;
-  };
-};
+
 
 export const useFileExplorer = create<FileExplorerState>((set, get) => ({
   templateData: null,
