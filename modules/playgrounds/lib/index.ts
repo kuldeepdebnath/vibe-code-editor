@@ -39,8 +39,6 @@ export const generateFileId = (file: TemplateFile, rootFolder: TemplateFolder): 
   const extension = file.fileExtension?.trim();
   const extensionSuffix = extension ? `.${extension}` : '';
 
-  // Combine path and filename
-  return path
-    ? `${path}/${file.filename}${extensionSuffix}`
-    : `${file.filename}${extensionSuffix}`;
+  // The path already includes the filename, so return it as-is.
+  return path || `${file.filename}${extensionSuffix}`;
 }

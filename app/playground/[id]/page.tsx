@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { usePlayground } from "@/modules/playgrounds/hooks/usePlayground";
+import type { TemplateFile, TemplateFolder } from "@/modules/playgrounds/lib/path-to-json";
 import {
   Tooltip,
   TooltipContent,
@@ -31,6 +32,43 @@ import {
   ResizablePanelGroup,
 } from "@/vibecode-starters/vite-shadcn/src/components/ui/resizable";
 import PlaygroundEditor from "@/modules/playgrounds/components/playground-editor";
+import { ResizableHandle } from "@/components/ui/resizable";
+import WebContainerPreview from "@/modules/webcontainers/components/webcontainer-preview";
+import { useWebContainer } from "@/modules/webcontainers/hooks/useWebConatiners";
+
+const preferredExtensions = new Set(["js", "jsx", "ts", "tsx", "mjs", "cjs"]);
+
+const collectFiles = (folder: TemplateFolder, files: TemplateFile[] = []): TemplateFile[] => {
+  for (const item of folder.items) {
+    if ("folderName" in item) {
+      collectFiles(item, files);
+    } else {
+      files.push(item);
+    }
+  }
+
+  return files;
+};
+
+const findInitialFile = (folder: TemplateFolder): TemplateFile | null => {
+  const files = collectFiles(folder);
+
+  const preferredIndex = files.find(
+    (file) =>
+      file.filename === "index" &&
+      (file.fileExtension === "js" ||
+        file.fileExtension === "jsx" ||
+        file.fileExtension === "ts" ||
+        file.fileExtension === "tsx")
+  );
+  if (preferredIndex) return preferredIndex;
+
+  const preferredCodeFile = files.find((file) => preferredExtensions.has(file.fileExtension));
+  if (preferredCodeFile) return preferredCodeFile;
+
+  return files[0] ?? null;
+};
+
 const MainPlaygroundPage = () => {
   const params = useParams();
   const id =
@@ -47,30 +85,63 @@ const MainPlaygroundPage = () => {
     activeFileId,
     closeAllFiles,
     closeFile,
+    templateData: explorerTemplateData,
     openFiles,
     openFile,
     setActiveFileId,
     setPlaygroundId,
     setTemplateData,
+    updateFileContent,
   } = useFileExplorer();
+
+  
+  const {
+    serverUrl,
+    isLoading: containerLoading,
+    error: containerError,
+    instance,
+    writeFileSync,
+  } = useWebContainer({ templateData });
 
   useEffect(() => {
     setPlaygroundId(id);
+    setIsPreviewVisible(false);
   }, [id, setPlaygroundId]);
 
   useEffect(() => {
-    if (templateData && !openFiles.length) {
+    if (templateData && !explorerTemplateData) {
       setTemplateData(templateData);
     }
-  }, [templateData, openFiles.length, setTemplateData]);
+  }, [templateData, explorerTemplateData, setTemplateData]);
+
+  useEffect(() => {
+    if (!templateData || !explorerTemplateData || openFiles.length > 0) {
+      return;
+    }
+
+    const initialFile = findInitialFile(explorerTemplateData);
+    if (initialFile) {
+      openFile(initialFile);
+    }
+  }, [templateData, explorerTemplateData, openFiles.length, openFile]);
 
   const handleSave = async () => {
-    if (!templateData) return;
-    await saveTemplateData(templateData);
+    const dataToSave = explorerTemplateData || templateData;
+    if (!dataToSave) return;
+    await saveTemplateData(dataToSave);
   };
 
   const activeFile = openFiles.find((file) => file.id === activeFileId) || null;
   const hasUnsavedChanges = openFiles.some((file) => file.hasUnsavedChanges);
+
+  const handleEditorContentChange = (value: string) => {
+    if (!activeFile) return;
+
+    updateFileContent(activeFile.id, value);
+    void writeFileSync(activeFile.id, value).catch((error) => {
+      console.error("Failed to sync file to WebContainer:", error);
+    });
+  };
 
   return (
     <TooltipProvider>
@@ -215,12 +286,33 @@ const MainPlaygroundPage = () => {
                       className="h-full"
                     >
                       <ResizablePanel defaultSize={isPreviewVisible ? 50 : 100}>
-                      <PlaygroundEditor
-                        activeFile={activeFile ?? undefined}
-                        content={activeFile?.content || ""}
-                        onContentChange={() => {}}
-                      />
+                        <PlaygroundEditor
+                          activeFile={activeFile ?? undefined}
+                          content={activeFile?.content || ""}
+                          onContentChange={handleEditorContentChange}
+                        />
                       </ResizablePanel>
+
+                      {isPreviewVisible && (
+                        <>
+                          <ResizableHandle />
+                          <ResizablePanel defaultSize={50}>
+                            {templateData && (
+                              <WebContainerPreview
+                                templateData={
+                                  templateData as NonNullable<typeof templateData>
+                                }
+                                instance={instance}
+                                writeFileSync={writeFileSync}
+                                isLoading={containerLoading}
+                                error={containerError}
+                                serverUrl={serverUrl || ""}
+                                forceResetup={false}
+                              />
+                            )}
+                          </ResizablePanel>
+                        </>
+                      )}
                     </ResizablePanelGroup>
                   </div>
                 </div>

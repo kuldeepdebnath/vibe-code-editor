@@ -445,18 +445,68 @@ export const useFileExplorer = create<FileExplorerState>((set, get) => ({
   },
 
   updateFileContent: (fileId, content) => {
-    set((state) => ({
-      openFiles: state.openFiles.map((file) =>
-        file.id === fileId
-          ? {
-              ...file,
-              content,
-              hasUnsavedChanges: content !== file.originalContent,
+    const updateTemplateTree = (
+      folder: TemplateFolder,
+      targetSegments: string[]
+    ): TemplateFolder => {
+      const [currentSegment, ...rest] = targetSegments;
+
+      if (!currentSegment) return folder;
+
+      if (rest.length === 0) {
+        const [filename, ...extensionParts] = currentSegment.split(".");
+        const fileExtension = extensionParts.join(".");
+
+        return {
+          ...folder,
+          items: folder.items.map((item) => {
+            if (
+              "filename" in item &&
+              item.filename === filename &&
+              item.fileExtension === fileExtension
+            ) {
+              return {
+                ...item,
+                content,
+              };
             }
-          : file
-      ),
-      editorContent:
-        fileId === state.activeFileId ? content : state.editorContent,
-    }));
+
+            return item;
+          }),
+        };
+      }
+
+      return {
+        ...folder,
+        items: folder.items.map((item) => {
+          if ("folderName" in item && item.folderName === currentSegment) {
+            return updateTemplateTree(item, rest);
+          }
+
+          return item;
+        }),
+      };
+    };
+
+    set((state) => {
+      const updatedTemplateData = state.templateData
+        ? updateTemplateTree(state.templateData, fileId.split("/").filter(Boolean))
+        : state.templateData;
+
+      return {
+        templateData: updatedTemplateData,
+        openFiles: state.openFiles.map((file) =>
+          file.id === fileId
+            ? {
+                ...file,
+                content,
+                hasUnsavedChanges: content !== file.originalContent,
+              }
+            : file
+        ),
+        editorContent:
+          fileId === state.activeFileId ? content : state.editorContent,
+      };
+    });
   },
 }));
