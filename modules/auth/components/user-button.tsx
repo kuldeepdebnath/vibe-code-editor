@@ -13,10 +13,13 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { LogOut, User } from "lucide-react";
 import LogoutButton from "./logout-button";
-import { useCurrentUser } from "../hooks/use-current-user";
+import type { DefaultSession } from "next-auth";
 
-const UserButton = () => {
-  const user = useCurrentUser();
+type UserButtonProps = {
+  user?: DefaultSession["user"] | null;
+};
+
+const UserButton = ({ user }: UserButtonProps) => {
   const userImage = user?.image ?? undefined;
   const userName = user?.name ?? "User";
 

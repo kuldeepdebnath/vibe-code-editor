@@ -2,8 +2,11 @@ import Link from "next/link";
 import Image from "next/image";
 import UserButton from "../auth/components/user-button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { auth } from "@/auth";
 
-export function Header() {
+export async function Header() {
+  const session = await auth();
+
   return (
     <>
       <div className="sticky top-0 left-0 right-0 z-50">
@@ -72,7 +75,7 @@ export function Header() {
                   <span className="text-zinc-300 dark:text-zinc-700">|</span>
                   {/* <HeaderPro /> */}
                   <ThemeToggle />
-                  <UserButton />
+                  <UserButton user={session?.user} />
                 </div>
 
                 {/* Mobile Navigation remains unchanged */}
@@ -90,7 +93,7 @@ export function Header() {
                     API
                   </Link>
                   <ThemeToggle />
-                  <UserButton />
+                  <UserButton user={session?.user} />
                 </div>
               </div>
             </div>
