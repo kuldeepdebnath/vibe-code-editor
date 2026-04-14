@@ -5,6 +5,9 @@ import { templatePaths } from "@/lib/template";
 import fs from "fs/promises";
 import path from "path";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function validatejsonStructure(data: unknown): boolean {
     try {
         JSON.parse(JSON.stringify(data));
@@ -36,8 +39,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     try {
-        const inputPath = path.join(process.cwd(), templatePath);
-        const outputFile = path.join(process.cwd(), `output/${templatekey}.json`);
+        const inputPath = path.join(/* turbopackIgnore: true */ process.cwd(), templatePath);
+        const outputFile = path.join(/* turbopackIgnore: true */ process.cwd(), `output/${templatekey}.json`);
 
         await saveTemplateStructureToJson(inputPath, outputFile);
 

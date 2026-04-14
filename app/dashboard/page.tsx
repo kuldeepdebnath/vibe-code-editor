@@ -5,6 +5,9 @@ import { deleteprojectById, duplicateProjectByid, editProjectById, getAllPlaygro
 import EmptyState from "@/modules/dashboard/components/empty-state";
 import ProjectTable from "@/modules/dashboard/components/project-table";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const Page = async () => {
   const playgrounds = await getAllPlaygroundForUser();
 
