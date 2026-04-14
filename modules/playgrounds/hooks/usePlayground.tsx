@@ -41,17 +41,25 @@ export const usePlayground = (id: string): UsePlaygroundReturn => {
             const rawContent = data?.templateFiles?.[0]?.content;
 
             if (typeof rawContent === "string") {
-                const parsedContent = JSON.parse(rawContent);
-                setTemplateData(parsedContent);
-                toast.success("playground loaded successfully")
-                return;
+                try {
+                    const parsedContent = JSON.parse(rawContent);
+                    setTemplateData(parsedContent);
+                    toast.success("playground loaded successfully")
+                    return;
+                } catch (parseError) {
+                    console.warn("Saved playground content is not valid JSON; falling back to template data.", parseError);
+                }
             }
 
             // load template from api if not in saved content
             const res = await fetch(`/api/template/${id}`);
-            if (!res.ok) throw new Error(`Failed to load template: ${res.status}`);
+            if (!res.ok) {
+                const fallbackText = await res.text();
+                throw new Error(`Failed to load template: ${res.status} ${fallbackText.slice(0, 120)}`);
+            }
 
-            const templateRes = await res.json();
+            const responseText = await res.text();
+            const templateRes = JSON.parse(responseText);
 
             if (templateRes?.templateJson && Array.isArray(templateRes.templateJson)) {
                 setTemplateData({
